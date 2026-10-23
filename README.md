@@ -125,7 +125,7 @@ Potential improvements include durable managed database storage, authentication 
 
 Repository: https://github.com/PratBrat8/Masal-AI---Sales-Lead-Assistant
 
-Live application: Add the deployed application URL here.
+Live application: https://masal-ai---sales-lead-assistant-8q4mbrw2yvoqgnwnycwdhf.streamlit.app
 
 ## AI Usage Disclosure
 
