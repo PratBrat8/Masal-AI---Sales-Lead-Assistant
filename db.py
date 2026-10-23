@@ -35,6 +35,11 @@ def init_db():
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    # Backward-compatible migration for existing local databases.
+    lead_columns = {row[1] for row in conn.execute("PRAGMA table_info(leads)").fetchall()}
+    if "status" not in lead_columns:
+        conn.execute("ALTER TABLE leads ADD COLUMN status TEXT NOT NULL DEFAULT 'Follow Up'")
+
     conn.execute("""
         CREATE TABLE IF NOT EXISTS follow_ups (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -95,6 +100,28 @@ def save_lead(lead_data, analysis):
     conn.commit()
     conn.close()
     return lead_id
+
+
+def update_lead_status(lead_id, status):
+    """Persist a lead's sales outcome/status."""
+    allowed = {"Follow Up", "Sale Closed", "No Sale Made"}
+    if status not in allowed:
+        raise ValueError("Invalid lead status")
+    conn = get_conn()
+    conn.execute("UPDATE leads SET status = ? WHERE id = ?", (status, lead_id))
+    conn.commit()
+    conn.close()
+
+
+def delete_lead(lead_id):
+    """Delete a lead and its follow-up trail."""
+    conn = get_conn()
+    conn.execute("DELETE FROM follow_ups WHERE lead_id = ?", (lead_id,))
+    cur = conn.execute("DELETE FROM leads WHERE id = ?", (lead_id,))
+    deleted = cur.rowcount > 0
+    conn.commit()
+    conn.close()
+    return deleted
 
 
 def list_leads():

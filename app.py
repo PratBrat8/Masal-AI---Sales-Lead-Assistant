@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 
 from db import (
     init_db, list_leads, save_lead, get_lead, add_follow_up,
-    update_remarks_anticipation, is_due_soon,
+    update_remarks_anticipation, is_due_soon, update_lead_status, delete_lead,
     list_task_lists, create_task_list, list_tasks, add_task, toggle_task, delete_task, delete_task_list,
     rescore_existing_leads,
 )
@@ -142,6 +142,14 @@ with addcol:
     st.write("")
     add_clicked = st.button("＋  Add New Lead", type="primary", use_container_width=True)
 
+follow_up_count = sum(1 for item in leads if item.get("status", "Follow Up") == "Follow Up")
+sale_closed_count = sum(1 for item in leads if item.get("status", "Follow Up") == "Sale Closed")
+no_sale_count = sum(1 for item in leads if item.get("status", "Follow Up") == "No Sale Made")
+s1, s2, s3 = st.columns(3, gap="small")
+with s1: metric("↻", follow_up_count, "Follow Up", "Leads still in progress", "#6c8dff")
+with s2: metric("✓", sale_closed_count, "Sale Closed", "Successful conversions", "#36d6b0")
+with s3: metric("×", no_sale_count, "No Sale Made", "Lost opportunities", "#ff5266")
+
 if leads:
     with st.expander("⚙️ Lead scoring tools", expanded=False):
         st.caption("Recalculate saved leads using the same transparent scoring rules. This does not call the AI API or change the qualitative summaries.")
@@ -194,6 +202,7 @@ with left:
     st.markdown('<div class="panel-head"><div><div class="panel-title">▤ &nbsp; Lead Pipeline</div><div class="panel-sub">Review incoming leads, ranked by priority</div></div></div>', unsafe_allow_html=True)
     search = st.text_input("Search leads", placeholder="⌕  Search by name, location or requirement…", label_visibility="collapsed", key="lead_search")
     filters = st.radio("Filter leads", ["All", "🔥 Hot", "🟡 Warm", "❄ Cold", "▣ Due Today"], horizontal=True, label_visibility="collapsed", key="lead_filter")
+    status_filter = st.selectbox("Sales status", ["All statuses", "Follow Up", "Sale Closed", "No Sale Made"], key="lead_status_filter")
     filtered = []
     for lead in leads:
         haystack = " ".join(str(lead.get(k, "")) for k in ["name", "location", "property_requirement", "budget"]).lower()
@@ -204,6 +213,7 @@ with left:
         if filters == "🟡 Warm" and lead.get("tier") != "Warm": continue
         if filters == "❄ Cold" and lead.get("tier") != "Cold": continue
         if filters == "▣ Due Today" and due != "today": continue
+        if status_filter != "All statuses" and lead.get("status", "Follow Up") != status_filter: continue
         filtered.append(lead)
     st.markdown(f'<div class="panel-sub" style="margin:8px 0 10px">Showing <b style="color:#edf2ff">{len(filtered)}</b> of {len(leads)} leads</div>', unsafe_allow_html=True)
     if filtered:
@@ -222,7 +232,9 @@ with left:
         due = lead.get("next_follow_up")
         score = max(0, min(100, int(lead.get("score") or 0)))
         icon = {"Hot": "🔥", "Warm": "🟡", "Cold": "❄️"}.get(tier, "•")
-        st.markdown(f'''<div class="lead-row {'selected' if is_selected else ''}"><div style="display:flex;align-items:center;gap:10px"><div style="flex:1;min-width:0"><div class="lead-name">{icon} &nbsp;{esc(lead.get('name'))}</div><div class="lead-meta">{esc(lead.get('property_requirement'))} &nbsp;·&nbsp; 📍 {esc(lead.get('location'))}</div></div><div style="text-align:right;min-width:55px"><div class="score">{score}<span style="font-size:10px;color:#7e8ba3"> /100</span></div><div class="score-track"><div class="score-fill" style="width:{score}%;background:{'#ff5266' if tier == 'Hot' else '#ffc45c' if tier == 'Warm' else '#8ba2c7'}"></div></div></div><span class="pill {tier_class(tier)}">{esc(tier)}</span></div><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:8px"><div class="lead-meta">Budget <b style="color:#dce5f7">{esc(lead.get('budget'))}</b> &nbsp;·&nbsp; Timeline {esc(lead.get('timeline'))}</div>{due_badge(due)}</div></div>''', unsafe_allow_html=True)
+        status = lead.get("status", "Follow Up")
+        status_icon = {"Follow Up": "↻", "Sale Closed": "✓", "No Sale Made": "×"}.get(status, "↻")
+        st.markdown(f'''<div class="lead-row {"selected" if is_selected else ""}"><div style="display:flex;align-items:center;gap:10px"><div style="flex:1;min-width:0"><div class="lead-name">{icon} &nbsp;{esc(lead.get('name'))}</div><div class="lead-meta">{esc(lead.get('property_requirement'))} &nbsp;·&nbsp; 📍 {esc(lead.get('location'))}</div></div><div style="text-align:right;min-width:55px"><div class="score">{score}<span style="font-size:10px;color:#7e8ba3"> /100</span></div><div class="score-track"><div class="score-fill" style="width:{score}%;background:{'#ff5266' if tier == 'Hot' else '#ffc45c' if tier == 'Warm' else '#8ba2c7'}"></div></div></div><span class="pill {tier_class(tier)}">{esc(tier)}</span></div><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:8px"><div class="lead-meta">Budget <b style="color:#dce5f7">{esc(lead.get('budget'))}</b> &nbsp;·&nbsp; Timeline {esc(lead.get('timeline'))}</div><span class="pill pill-neutral">{status_icon} {esc(status)}</span>{due_badge(due)}</div></div>''', unsafe_allow_html=True)
         if is_selected:
             st.caption("✓ Selected · details shown in the workspace")
 
@@ -248,6 +260,36 @@ with right:
         for col, label, value in [(a, "BUDGET", lead.get("budget")), (b, "BUYING TIMELINE", lead.get("timeline")), (c, "FOLLOW-UPS", lead.get("follow_up_count", 0))]:
             with col:
                 st.markdown(f'<div class="info-tile"><div class="info-label">{label}</div><div class="info-value">{esc(value)}</div></div>', unsafe_allow_html=True)
+        st.write("")
+        st.markdown('<div class="section-label">▣ &nbsp; Sales outcome</div>', unsafe_allow_html=True)
+        status_options = ["Follow Up", "Sale Closed", "No Sale Made"]
+        saved_status = lead.get("status", "Follow Up")
+        status_col, status_btn_col = st.columns([2, 1])
+        with status_col:
+            chosen_status = st.selectbox(
+                "Lead status", status_options,
+                index=status_options.index(saved_status) if saved_status in status_options else 0,
+                key=f"lead_status_{selected_id}",
+            )
+        with status_btn_col:
+            st.write("")
+            st.write("")
+            if st.button("Save status", key=f"save_lead_status_{selected_id}", use_container_width=True):
+                update_lead_status(selected_id, chosen_status)
+                st.success(f"Status updated to {chosen_status}.")
+                st.rerun()
+
+        with st.expander("⚠️ Delete this lead", expanded=False):
+            st.warning(f"This permanently deletes {lead.get('name', 'this lead')} and its follow-up history. This cannot be undone.")
+            confirm_delete = st.checkbox("I understand — permanently delete this lead", key=f"confirm_delete_lead_{selected_id}")
+            if st.button("Delete lead permanently", key=f"delete_lead_{selected_id}", type="primary", disabled=not confirm_delete, use_container_width=True):
+                deleted = delete_lead(selected_id)
+                st.session_state.get("chat_history", {}).pop(selected_id, None)
+                remaining = list_leads()
+                st.session_state.selected_lead_id = remaining[0]["id"] if remaining else None
+                st.success("Lead deleted." if deleted else "Lead was already deleted.")
+                st.rerun()
+
         st.write("")
         st.markdown('<div class="section-label">✦ &nbsp; AI Summary</div>', unsafe_allow_html=True)
         st.write(analysis.get("summary", "No summary available."))
